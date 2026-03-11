@@ -1153,7 +1153,7 @@ class ReportAgent:
         logger.info("开始规划报告大纲...")
 
         if progress_callback:
-            progress_callback("planning", 0, "正在分析模拟需求...")
+            progress_callback("planning", 0, "시뮬레이션 요구사항을 분석 중이야...")
 
         # 首先获取模拟上下文
         context = self.zep_tools.get_simulation_context(
@@ -1161,7 +1161,7 @@ class ReportAgent:
         )
 
         if progress_callback:
-            progress_callback("planning", 30, "正在生成报告大纲...")
+            progress_callback("planning", 30, "보고서 개요를 생성 중이야...")
 
         system_prompt = PLAN_SYSTEM_PROMPT
         user_prompt = PLAN_USER_PROMPT_TEMPLATE.format(
@@ -1187,7 +1187,7 @@ class ReportAgent:
             )
 
             if progress_callback:
-                progress_callback("planning", 80, "正在解析大纲结构...")
+                progress_callback("planning", 80, "개요 구조를 정리 중이야...")
 
             # 解析大纲
             sections = []
@@ -1203,7 +1203,7 @@ class ReportAgent:
             )
 
             if progress_callback:
-                progress_callback("planning", 100, "大纲规划完成")
+                progress_callback("planning", 100, "개요 구성이 완료됐어")
 
             logger.info(f"大纲规划完成: {len(sections)} 个章节")
             return outline
@@ -1625,21 +1625,29 @@ class ReportAgent:
             self.console_logger = ReportConsoleLogger(report_id)
 
             ReportManager.update_progress(
-                report_id, "pending", 0, "初始化报告...", completed_sections=[]
+                report_id,
+                "pending",
+                0,
+                "보고서를 초기화하는 중...",
+                completed_sections=[],
             )
             ReportManager.save_report(report)
 
             # 阶段1: 规划大纲
             report.status = ReportStatus.PLANNING
             ReportManager.update_progress(
-                report_id, "planning", 5, "开始规划报告大纲...", completed_sections=[]
+                report_id,
+                "planning",
+                5,
+                "보고서 개요 구성을 시작하는 중...",
+                completed_sections=[],
             )
 
             # 记录规划开始日志
             self.report_logger.log_planning_start()
 
             if progress_callback:
-                progress_callback("planning", 0, "开始规划报告大纲...")
+                progress_callback("planning", 0, "보고서 개요 구성을 시작하는 중...")
 
             outline = self.plan_outline(
                 progress_callback=lambda stage, prog, msg: progress_callback(
@@ -1659,7 +1667,7 @@ class ReportAgent:
                 report_id,
                 "planning",
                 15,
-                f"大纲规划完成，共{len(outline.sections)}个章节",
+                f"개요 구성이 완료됐어. 총 {len(outline.sections)}개 섹션이야",
                 completed_sections=[],
             )
             ReportManager.save_report(report)
@@ -1681,7 +1689,7 @@ class ReportAgent:
                     report_id,
                     "generating",
                     base_progress,
-                    f"正在生成章节: {section.title} ({section_num}/{total_sections})",
+                    f"섹션 생성 중: {section.title} ({section_num}/{total_sections})",
                     current_section=section.title,
                     completed_sections=completed_section_titles,
                 )
@@ -1690,7 +1698,7 @@ class ReportAgent:
                     progress_callback(
                         "generating",
                         base_progress,
-                        f"正在生成章节: {section.title} ({section_num}/{total_sections})",
+                        f"섹션 생성 중: {section.title} ({section_num}/{total_sections})",
                     )
 
                 # 生成主章节内容
@@ -1737,13 +1745,13 @@ class ReportAgent:
 
             # 阶段3: 组装完整报告
             if progress_callback:
-                progress_callback("generating", 95, "正在组装完整报告...")
+                progress_callback("generating", 95, "최종 보고서를 조립하는 중이야...")
 
             ReportManager.update_progress(
                 report_id,
                 "generating",
                 95,
-                "正在组装完整报告...",
+                "최종 보고서를 조립하는 중이야...",
                 completed_sections=completed_section_titles,
             )
 
@@ -1769,12 +1777,12 @@ class ReportAgent:
                 report_id,
                 "completed",
                 100,
-                "报告生成完成",
+                "보고서 생성이 완료됐어",
                 completed_sections=completed_section_titles,
             )
 
             if progress_callback:
-                progress_callback("completed", 100, "报告生成完成")
+                progress_callback("completed", 100, "보고서 생성이 완료됐어")
 
             logger.info(f"报告生成完成: {report_id}")
 
