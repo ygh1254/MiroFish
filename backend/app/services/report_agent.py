@@ -388,9 +388,14 @@ class ReportSection:
 
     title: str
     content: str = ""
+    description: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"title": self.title, "content": self.content}
+        return {
+            "title": self.title,
+            "content": self.content,
+            "description": self.description,
+        }
 
     def to_markdown(self, level: int = 2) -> str:
         """Markdown"""
@@ -562,7 +567,9 @@ PLAN_SYSTEM_PROMPT = """\
 - 섹션은 최소 2개, 최대 5개다
 - 하위 섹션은 만들지 말고 각 섹션을 하나의 완결된 단위로 설계한다
 - 내용은 군더더기 없이 핵심 예측 발견에 집중한다
-- 섹션 구조는 예측 결과에 맞게 스스로 설계한다
+- 각 섹션은 서로 다른 분석 임무를 가져야 하며 내용이 겹치면 안 된다
+- 시간 흐름, 반응 주체, 구조적 위험처럼 관점을 분리해 설계하라
+- 시뮬레이션 요구사항에 국가/권역 비교가 있으면 섹션 구조에도 반영하라
 
 다음 JSON 형식으로 보고서 개요를 출력하라.
 {
@@ -586,7 +593,11 @@ PLAN_USER_PROMPT_TEMPLATE = """\
 - 참여 엔티티 수: {total_nodes}
 - 생성된 관계 수: {total_edges}
 - 엔티티 유형 분포: {entity_types}
+- 관계 유형 분포: {relation_types}
 - 활성 Agent 수: {total_entities}
+
+[대표 엔티티 샘플]
+{representative_entities_json}
 
 [예측된 미래 사실 샘플]
 {related_facts_json}
@@ -595,12 +606,14 @@ PLAN_USER_PROMPT_TEMPLATE = """\
 1. 주어진 조건 아래 미래는 어떤 상태로 전개됐는가?
 2. 각 Agent 집단은 어떻게 반응하고 행동했는가?
 3. 이 시뮬레이션은 어떤 주목할 만한 미래 흐름을 보여주는가?
+4. 어느 국가/권역/집단의 시각이 서로 다르게 갈리는가?
 
 예측 결과를 바탕으로 가장 적합한 보고서 섹션 구조를 설계하라.
 
 [다시 강조]
 - 섹션 수는 최소 2개, 최대 5개
-- 내용은 핵심 예측 발견에 집중하고 간결해야 함
+- 각 섹션은 서로 다른 질문에 답해야 하며 핵심 근거도 달라야 함
+- 같은 현상을 반복 설명하지 말고 시간, 집단, 시스템 리스크처럼 초점을 분리하라
 - 제목, 요약, 섹션 제목과 설명은 모두 한국어로 작성"""
 
 # ── sectiongeneration prompt ──
@@ -613,6 +626,7 @@ SECTION_SYSTEM_PROMPT_TEMPLATE = """\
 예측 시나리오(시뮬레이션 요구사항): {simulation_requirement}
 
 현재 작성할 섹션: {section_title}
+섹션 설계 의도: {section_description}
 
 ═══════════════════════════════════════════════════════════════
 [핵심 관점]
@@ -741,18 +755,22 @@ SECTION_SYSTEM_PROMPT_TEMPLATE = """\
 7. 다시 강조하지만 제목은 쓰지 말고, 필요하면 **굵은 글씨**로 구조를 잡아라"""
 
 SECTION_USER_PROMPT_TEMPLATE = """\
-이미 완료된 섹션 내용(중복을 피하기 위해 꼭 읽어라):
-{previous_content}
+이전에 완료된 섹션 요약(중복을 피하기 위해 꼭 읽어라):
+{previous_section_context}
+
+이미 사용한 핵심 인용/근거(가능하면 재사용하지 마라):
+{used_quotes}
 
 ═══════════════════════════════════════════════════════════════
 [현재 작업] 작성할 섹션: {section_title}
 ═══════════════════════════════════════════════════════════════
 
 [중요 안내]
-1. 위의 완료된 섹션을 읽고 같은 내용을 반복하지 마라
+1. 위 섹션 요약과 이미 사용한 근거를 읽고 같은 설명과 인용을 반복하지 마라
 2. 시작 시 최소 1회는 도구를 호출해 시뮬레이션 데이터를 확보하라
-3. 한 가지 도구만 반복하지 말고 섞어서 사용하라
+3. 이 섹션만의 새로운 근거, 새로운 집단, 새로운 전환 포인트를 찾아라
 4. 보고서 내용은 반드시 검색 결과에서 나와야 하며 네 지식을 끼워 넣지 마라
+5. 다른 섹션에서 이미 충분히 다룬 프레임은 짧게 연결만 하고, 새로운 분석 축으로 넘어가라
 
 [형식 경고]
 - ❌ 어떤 제목도 쓰지 마라 (#, ##, ###, #### 금지)
@@ -761,8 +779,8 @@ SECTION_USER_PROMPT_TEMPLATE = """\
 - ✅ 본문만 쓰고, 필요하면 **굵은 글씨**로 소주제를 표현하라
 
 이제 시작하라:
-1. 이 섹션에 필요한 정보가 무엇인지 먼저 생각하고
-2. 도구를 호출해 시뮬레이션 데이터를 수집한 뒤
+1. 이 섹션만의 질문을 먼저 분명히 정하고
+2. 이전 섹션과 겹치지 않는 근거를 도구로 수집한 뒤
 3. 충분한 근거가 모이면 Final Answer로 본문만 출력하라"""
 
 # ── ReACT  ──
@@ -1202,6 +1220,41 @@ class ReportAgent:
                 desc_parts.append(f"  파라미터: {params_desc}")
         return "\n".join(desc_parts)
 
+    def _extract_used_quotes(self, content: str) -> List[str]:
+        quotes = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('>'):
+                quote = stripped.lstrip('> ').strip()
+                if quote:
+                    quotes.append(quote)
+        return quotes
+
+    def _build_previous_section_context(self, previous_sections: List[str]) -> str:
+        if not previous_sections:
+            return "(첫 번째 섹션임)"
+
+        contexts = []
+        for sec in previous_sections:
+            lines = sec.splitlines()
+            title = lines[0].lstrip('# ').strip() if lines else '이전 섹션'
+            body = "\n".join(lines[1:]).strip()
+            summary = body[:1200] + "..." if len(body) > 1200 else body
+            contexts.append(f"- {title}:\n{summary}")
+        return "\n\n".join(contexts)
+
+    def _build_used_quote_context(self, previous_sections: List[str]) -> str:
+        quotes: List[str] = []
+        seen = set()
+        for sec in previous_sections:
+            for quote in self._extract_used_quotes(sec):
+                if quote not in seen:
+                    seen.add(quote)
+                    quotes.append(quote)
+        if not quotes:
+            return "(아직 사용한 핵심 인용이 없음)"
+        return "\n".join(f'- {quote}' for quote in quotes[:12])
+
     def plan_outline(
         self, progress_callback: Optional[Callable] = None
     ) -> ReportOutline:
@@ -1237,9 +1290,16 @@ class ReportAgent:
             entity_types=list(
                 context.get("graph_statistics", {}).get("entity_types", {}).keys()
             ),
+            relation_types=json.dumps(
+                context.get("graph_statistics", {}).get("relation_types", {}),
+                ensure_ascii=False,
+            ),
             total_entities=context.get("total_entities", 0),
+            representative_entities_json=json.dumps(
+                context.get("entities", [])[:15], ensure_ascii=False, indent=2
+            ),
             related_facts_json=json.dumps(
-                context.get("related_facts", [])[:10], ensure_ascii=False, indent=2
+                context.get("related_facts", [])[:30], ensure_ascii=False, indent=2
             ),
         )
 
@@ -1259,7 +1319,11 @@ class ReportAgent:
             sections = []
             for section_data in response.get("sections", []):
                 sections.append(
-                    ReportSection(title=section_data.get("title", ""), content="")
+                    ReportSection(
+                        title=section_data.get("title", ""),
+                        content="",
+                        description=section_data.get("description", ""),
+                    )
                 )
 
             outline = ReportOutline(
@@ -1281,9 +1345,9 @@ class ReportAgent:
                 title="미래 예측 보고서",
                 summary="시뮬레이션 기반 미래 흐름과 리스크 분석",
                 sections=[
-                    ReportSection(title="예측 시나리오와 핵심 발견"),
-                    ReportSection(title="집단 행동 예측 분석"),
-                    ReportSection(title="향후 흐름 전망과 리스크 시사점"),
+                    ReportSection(title="예측 시나리오와 핵심 발견", description="핵심 사건 전개와 초기 충격을 요약"),
+                    ReportSection(title="집단 행동 예측 분석", description="주요 집단의 반응과 프레임 분화를 분석"),
+                    ReportSection(title="향후 흐름 전망과 리스크 시사점", description="전환 포인트와 시스템 리스크를 정리"),
                 ],
             )
 
@@ -1320,30 +1384,24 @@ class ReportAgent:
         # sectionStartlogs
         if self.report_logger:
             self.report_logger.log_section_start(section.title, section_index)
-
         system_prompt = SECTION_SYSTEM_PROMPT_TEMPLATE.format(
             report_title=outline.title,
             report_summary=outline.summary,
             simulation_requirement=self.simulation_requirement,
             section_title=section.title,
+            section_description=section.description or "이 섹션의 고유한 질문에 답하라",
             tools_description=self._get_tools_description(),
         )
 
-        # buildprompt - eachDonesection4000
-        if previous_sections:
-            previous_parts = []
-            for sec in previous_sections:
-                # eachsection4000
-                truncated = sec[:4000] + "..." if len(sec) > 4000 else sec
-                previous_parts.append(truncated)
-            previous_content = "\n\n---\n\n".join(previous_parts)
-        else:
-            previous_content = "(첫 번째 섹션임)"
+        previous_section_context = self._build_previous_section_context(previous_sections)
+        used_quotes = self._build_used_quote_context(previous_sections)
 
         user_prompt = SECTION_USER_PROMPT_TEMPLATE.format(
-            previous_content=previous_content,
+            previous_section_context=previous_section_context,
+            used_quotes=used_quotes,
             section_title=section.title,
         )
+
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -2605,7 +2663,11 @@ class ReportManager:
             sections = []
             for s in outline_data.get("sections", []):
                 sections.append(
-                    ReportSection(title=s["title"], content=s.get("content", ""))
+                    ReportSection(
+                        title=s["title"],
+                        content=s.get("content", ""),
+                        description=s.get("description", ""),
+                    )
                 )
             outline = ReportOutline(
                 title=outline_data["title"],
@@ -2710,4 +2772,10 @@ class ReportManager:
             deleted = True
 
         return deleted
+
+
+
+
+
+
 
