@@ -64,7 +64,7 @@ class LLMClient:
         response = self.client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content
         # 部分模型（如MiniMax M2.5）会在content中包含<think>思考内容，需要移除
-        content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
+        content = re.sub(r'<(?:think(?:ing)?|reasoning)[^>]*>[\s\S]*?</(?:think(?:ing)?|reasoning)>', '', content).strip()
         return content
     
     def chat_json(
@@ -88,7 +88,7 @@ class LLMClient:
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            response_format={"type": "json_object"}
+            # response_format removed for Codex Responses API compat
         )
         # 清理markdown代码块标记
         cleaned_response = response.strip()
