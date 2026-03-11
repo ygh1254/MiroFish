@@ -1423,29 +1423,29 @@ JSON 형식의 하위 질문 목록만 반환하라."""
                 import re
                 combined_responses = f"{twitter_response} {reddit_response}"
 
-                # , , Markdown 
+                # Remove headings, inline tool payloads, and noisy markdown wrappers
                 clean_text = re.sub(r'#{1,6}\s+', '', combined_responses)
                 clean_text = re.sub(r'\{[^}]*tool_name[^}]*\}', '', clean_text)
                 clean_text = re.sub(r'[*_`|>~\-]{2,}', '', clean_text)
-                clean_text = re.sub(r'\d+[:]\s*', '', clean_text)
-                clean_text = re.sub(r'[^]+', '', clean_text)
+                clean_text = re.sub(r'\d+[：:]\s*', '', clean_text)
+                clean_text = re.sub(r'【[^】]+】', '', clean_text)
 
-                # 1: completehascontent
-                sentences = re.split(r'[]', clean_text)
+                # Prefer sentence-like excerpts with meaningful content
+                sentences = re.split(r'[。！？.!?]', clean_text)
                 meaningful = [
                     s.strip() for s in sentences
                     if 20 <= len(s.strip()) <= 150
-                    and not re.match(r'^[\s\W,;:, ]+', s.strip())
+                    and not re.match(r'^[\s\W，,；;：:, ]+', s.strip())
                     and not s.strip().startswith(('{', ''))
                 ]
                 meaningful.sort(key=len, reverse=True)
-                key_quotes = [s + "" for s in meaningful[:3]]
+                key_quotes = [s + '。' for s in meaningful[:3]]
 
-                # 2: 
+                # Fallback to quoted snippets if sentence splitting yields nothing
                 if not key_quotes:
                     paired = re.findall(r'\u201c([^\u201c\u201d]{15,100})\u201d', clean_text)
                     paired += re.findall(r'\u300c([^\u300c\u300d]{15,100})\u300d', clean_text)
-                    key_quotes = [q for q in paired if not re.match(r'^[,;:, ]', q)][:3]
+                    key_quotes = [q for q in paired if not re.match(r'^[，,；;：:, ]', q)][:3]
                 
                 interview = AgentInterview(
                     agent_name=agent_name,

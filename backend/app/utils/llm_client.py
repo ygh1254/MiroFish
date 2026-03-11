@@ -84,6 +84,29 @@ class LLMClient:
         ).strip()
         return content
 
+    def _extract_json_payload(self, response: str) -> str:
+        """Extract a JSON object/array from fenced or wrapped model output."""
+        cleaned = response.strip()
+        cleaned = re.sub(
+            r"^```(?:json)?\s*\n?", "", cleaned, flags=re.IGNORECASE
+        )
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned).strip()
+
+        if cleaned[:1] in "[{":
+            return cleaned
+
+        decoder = json.JSONDecoder()
+        for start, ch in enumerate(cleaned):
+            if ch not in '[{':
+                continue
+            try:
+                _, end = decoder.raw_decode(cleaned[start:])
+                return cleaned[start:start + end]
+            except json.JSONDecodeError:
+                continue
+
+        return cleaned
+
     def chat_json(
         self,
         messages: List[Dict[str, str]],
@@ -110,15 +133,10 @@ class LLMClient:
             timeout=timeout,
             # response_format removed for Codex Responses API compat
         )
-        # Remove fenced Markdown code block markers
-        cleaned_response = response.strip()
-        cleaned_response = re.sub(
-            r"^```(?:json)?\s*\n?", "", cleaned_response, flags=re.IGNORECASE
-        )
-        cleaned_response = re.sub(r"\n?```\s*$", "", cleaned_response)
-        cleaned_response = cleaned_response.strip()
+        cleaned_response = self._extract_json_payload(response)
 
         try:
             return json.loads(cleaned_response)
         except json.JSONDecodeError:
             raise ValueError(f"Invalid JSON returned by LLM: {cleaned_response}")
+

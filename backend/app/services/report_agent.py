@@ -637,7 +637,7 @@ SECTION_SYSTEM_PROMPT_TEMPLATE = """\
    - 너는 관찰자 시점에서 미래의 예행연습을 읽고 있다
    - 모든 내용은 시뮬레이션 안에서 실제로 일어난 사건과 Agent의 발언/행동에 근거해야 한다
    - 너 자신의 일반 지식으로 내용을 채우면 안 된다
-   - 각 섹션마다 최소 3회, 최대 5회 도구를 호출해 근거를 수집해야 한다
+   - 각 섹션마다 최소 1회는 도구를 호출해 근거를 확보하고, 충분한 근거가 모이면 즉시 마무리한다
 
 2. [반드시 Agent의 원문 발언과 행동을 근거로 인용할 것]
    - Agent의 발언과 행동은 미래 집단행동의 예측 단서다
@@ -693,7 +693,7 @@ SECTION_SYSTEM_PROMPT_TEMPLATE = """\
 ```
 
 ═══════════════════════════════════════════════════════════════
-[사용 가능한 검색 도구] (섹션당 3~5회 호출)
+[사용 가능한 검색 도구] (섹션당 1~4회, 필요시 호출)
 ═══════════════════════════════════════════════════════════════
 
 {tools_description}
@@ -750,7 +750,7 @@ SECTION_USER_PROMPT_TEMPLATE = """\
 
 [중요 안내]
 1. 위의 완료된 섹션을 읽고 같은 내용을 반복하지 마라
-2. 시작 전에 반드시 도구를 호출해 시뮬레이션 데이터를 확보하라
+2. 시작 시 최소 1회는 도구를 호출해 시뮬레이션 데이터를 확보하라
 3. 한 가지 도구만 반복하지 말고 섞어서 사용하라
 4. 보고서 내용은 반드시 검색 결과에서 나와야 하며 네 지식을 끼워 넣지 마라
 
@@ -1048,64 +1048,147 @@ class ReportAgent:
     }
 
     def _parse_tool_calls(self, response: str) -> List[Dict[str, Any]]:
-        """
-        LLMtoolCall
+        """Parse tool calls from the local model's mixed output formats."""
+        tool_calls: List[Dict[str, Any]] = []
+        stripped = response.strip()
 
-        
-        1. <tool_call>{"name": "tool_name", "parameters": {...}}</tool_call>
-        2.  JSONtoolCall JSON
-        """
-        tool_calls = []
+        def append_if_valid(candidate: Dict[str, Any]) -> None:
+            if self._is_valid_tool_call(candidate):
+                tool_calls.append(candidate)
 
-        # 1: XML
         xml_pattern = r"<tool_call>\s*(\{.*?\})\s*</tool_call>"
         for match in re.finditer(xml_pattern, response, re.DOTALL):
             try:
-                call_data = json.loads(match.group(1))
-                tool_calls.append(call_data)
+                append_if_valid(json.loads(match.group(1)))
             except json.JSONDecodeError:
                 pass
-
         if tool_calls:
             return tool_calls
 
-        # 2:  - LLM output JSON <tool_call> 
-        # 1 JSON
-        stripped = response.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                call_data = json.loads(stripped)
-                if self._is_valid_tool_call(call_data):
-                    tool_calls.append(call_data)
-                    return tool_calls
+                append_if_valid(json.loads(stripped))
             except json.JSONDecodeError:
                 pass
+        if tool_calls:
+            return tool_calls
 
-        #  +  JSONafter JSON 
         json_pattern = r'(\{"(?:name|tool)"\s*:.*?\})\s*$'
         match = re.search(json_pattern, stripped, re.DOTALL)
         if match:
             try:
-                call_data = json.loads(match.group(1))
-                if self._is_valid_tool_call(call_data):
-                    tool_calls.append(call_data)
+                append_if_valid(json.loads(match.group(1)))
             except json.JSONDecodeError:
                 pass
+        if tool_calls:
+            return tool_calls
+
+        call_pattern = r"<tool_call>\s*([a-zA-Z_][\w]*)\s*\((\{.*?\})\)\s*(?:</tool_call>|$)"
+        for match in re.finditer(call_pattern, response, re.DOTALL):
+            append_if_valid({
+                "name": match.group(1),
+                "parameters": self._coerce_tool_parameters(match.group(2)),
+            })
+        if tool_calls:
+            return tool_calls
+
+        function_pattern = r"<tool_call>\s*<function=([a-zA-Z_][\w]*)>(.*?)</function>\s*</tool_call>"
+        for match in re.finditer(function_pattern, response, re.DOTALL):
+            append_if_valid({
+                "name": match.group(1),
+                "parameters": self._build_parameter_dict_from_xml(match.group(2)),
+            })
+        if tool_calls:
+            return tool_calls
+
+        token_pattern = r"(?:<tool_call>)?\s*([a-zA-Z_][\w]*)[^\n]*?<\|tool_call_argument_begin\|>\s*(\{.*?\})\s*<\|tool_call_end\|>"
+        for match in re.finditer(token_pattern, response, re.DOTALL):
+            append_if_valid({
+                "name": match.group(1),
+                "parameters": self._coerce_tool_parameters(match.group(2)),
+            })
+        if tool_calls:
+            return tool_calls
+
+        loose_pattern = r"(?:<tool_call>\s*)?([a-zA-Z_][\w]*)\s*(\{.*\})"
+        match = re.search(loose_pattern, stripped, re.DOTALL)
+        if match:
+            append_if_valid({
+                "name": match.group(1),
+                "parameters": self._coerce_tool_parameters(match.group(2)),
+            })
 
         return tool_calls
 
     def _is_valid_tool_call(self, data: dict) -> bool:
         """ JSON whethertoolCall"""
-        #  {"name": ..., "parameters": ...}  {"tool": ..., "params": ...} 
         tool_name = data.get("name") or data.get("tool")
         if tool_name and tool_name in self.VALID_TOOL_NAMES:
-            #  name / parameters
             if "tool" in data:
                 data["name"] = data.pop("tool")
             if "params" in data and "parameters" not in data:
                 data["parameters"] = data.pop("params")
+            if "parameters" not in data or not isinstance(data["parameters"], dict):
+                data["parameters"] = self._coerce_tool_parameters(
+                    data.get("parameters") or data.get("arguments") or {}
+                )
+            else:
+                data["parameters"] = self._coerce_tool_parameters(data["parameters"])
             return True
         return False
+
+    def _coerce_tool_parameters(self, parameters: Any) -> Dict[str, Any]:
+        """Normalize model-produced tool arguments into a dict."""
+        if parameters is None:
+            return {}
+        if isinstance(parameters, dict):
+            return parameters
+        if isinstance(parameters, str):
+            stripped = parameters.strip()
+            if not stripped:
+                return {}
+            try:
+                decoded = json.loads(stripped)
+                if isinstance(decoded, dict):
+                    return decoded
+            except json.JSONDecodeError:
+                pass
+            return {"query": stripped}
+        return {}
+
+    def _build_parameter_dict_from_xml(self, body: str) -> Dict[str, Any]:
+        """Parse <parameter=name>value</parameter> blocks."""
+        params: Dict[str, Any] = {}
+        for match in re.finditer(
+            r"<parameter=([a-zA-Z_][\w-]*)>\s*(.*?)\s*</parameter>",
+            body,
+            re.DOTALL,
+        ):
+            key = match.group(1)
+            value = match.group(2).strip()
+            if value.lower() in {"true", "false"}:
+                params[key] = value.lower() == "true"
+                continue
+            try:
+                params[key] = json.loads(value)
+            except json.JSONDecodeError:
+                params[key] = value
+        return params
+
+    def _looks_like_tool_attempt(self, response: str) -> bool:
+        lowered = response.lower()
+        return any(
+            marker in lowered
+            for marker in (
+                "<tool_call>",
+                "<function=",
+                "tool_call_argument_begin",
+                "insight_forge",
+                "panorama_search",
+                "quick_search",
+                "interview_agents",
+            )
+        )
 
     def _get_tools_description(self) -> str:
         """generationtool"""
@@ -1269,8 +1352,8 @@ class ReportAgent:
 
         # ReACT
         tool_calls_count = 0
-        max_iterations = 5  # rounds
-        min_tool_calls = 3  # toolCall
+        max_iterations = 8  # rounds
+        min_tool_calls = 1  # Require at least one successful evidence fetch
         conflict_retries = 0  # toolCallFinal Answer
         used_tools = set()  # Calltool
         all_tools = {
@@ -1482,8 +1565,29 @@ class ReportAgent:
             # ── 3hastoolCallhas Final Answer ──
             messages.append({"role": "assistant", "content": response})
 
+            if self._looks_like_tool_attempt(response) and tool_calls_count < self.MAX_TOOL_CALLS_PER_SECTION:
+                unused_tools = all_tools - used_tools
+                unused_hint = (
+                    f"(아직 사용하지 않은 도구: {', '.join(unused_tools)})"
+                    if unused_tools
+                    else ""
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "[도구 형식 오류] 도구 호출 의도는 보였지만 파싱되지 않았다. "
+                            "반드시 아래 형식 중 하나로만 다시 출력하라.\n"
+                            "1) <tool_call>{\"name\": \"insight_forge\", \"parameters\": {\"query\": \"...\"}}</tool_call>\n"
+                            "2) <tool_call>{\"name\": \"panorama_search\", \"parameters\": {\"query\": \"...\", \"include_expired\": false}}</tool_call>\n"
+                            "설명문이나 Final Answer를 섞지 말고 도구 호출 블록만 출력하라."
+                            + unused_hint
+                        ),
+                    }
+                )
+                continue
+
             if tool_calls_count < min_tool_calls:
-                # toolCalltool
                 unused_tools = all_tools - used_tools
                 unused_hint = (
                     f"(아직 사용하지 않은 도구: {', '.join(unused_tools)})"
@@ -1503,8 +1607,6 @@ class ReportAgent:
                 )
                 continue
 
-            # toolCallLLM outputcontent "Final Answer:" 
-            # content
             logger.info(
                 f"섹션 {section.title}에서 'Final Answer:' 접두어가 없어도 현재 출력을 최종 본문으로 채택함 (도구 호출: {tool_calls_count}회)"
             )
@@ -2608,3 +2710,4 @@ class ReportManager:
             deleted = True
 
         return deleted
+
