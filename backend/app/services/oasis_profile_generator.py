@@ -287,9 +287,12 @@ class OasisProfileGenerator:
             user_id=user_id,
             user_name=user_name,
             name=name,
-            bio=profile_data.get("bio", f"{entity_type}: {name}"),
-            persona=profile_data.get(
-                "persona", entity.summary or f"A {entity_type} named {name}."
+            bio=self._coerce_text(
+                profile_data.get("bio"), f"{entity_type}: {name}"
+            ),
+            persona=self._coerce_text(
+                profile_data.get("persona"),
+                entity.summary or f"A {entity_type} named {name}.",
             ),
             karma=profile_data.get("karma", random.randint(500, 5000)),
             friend_count=profile_data.get("friend_count", random.randint(50, 500)),
@@ -302,9 +305,11 @@ class OasisProfileGenerator:
             age=profile_data.get("age"),
             gender=profile_data.get("gender"),
             mbti=profile_data.get("mbti"),
-            country=profile_data.get("country"),
-            profession=profile_data.get("profession"),
-            interested_topics=profile_data.get("interested_topics", []),
+            country=self._coerce_text(profile_data.get("country"), "Global"),
+            profession=self._coerce_text(profile_data.get("profession"), ""),
+            interested_topics=self._coerce_topics(
+                profile_data.get("interested_topics", [])
+            ),
             source_entity_uuid=entity.uuid,
             source_entity_type=entity_type,
         )
@@ -318,6 +323,84 @@ class OasisProfileGenerator:
         # addafter
         suffix = random.randint(100, 999)
         return f"{username}_{suffix}"
+
+
+    def _coerce_text(
+        self,
+        value: Any,
+        fallback: str = "",
+        max_length: Optional[int] = None,
+        list_separator: str = ", ",
+    ) -> str:
+        """Coerce mixed LLM outputs into a stable string field."""
+        if value is None:
+            text = fallback
+        elif isinstance(value, str):
+            text = value.strip() or fallback
+        elif isinstance(value, (list, tuple, set)):
+            parts = [
+                self._coerce_text(item, "", list_separator=list_separator)
+                for item in value
+            ]
+            parts = [part for part in parts if part]
+            text = list_separator.join(parts) if parts else fallback
+        elif isinstance(value, dict):
+            preferred_keys = (
+                "bio",
+                "persona",
+                "content",
+                "summary",
+                "description",
+                "text",
+                "profession",
+                "country",
+                "value",
+                "name",
+                "title",
+            )
+            text = ""
+            for key in preferred_keys:
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    text = candidate.strip()
+                    break
+            if not text:
+                text = json.dumps(value, ensure_ascii=False)
+        else:
+            text = str(value)
+
+        text = text.replace("\n", " ").replace("\r", " ").strip()
+        if max_length and text:
+            text = text[:max_length]
+        return text or fallback
+
+    def _coerce_topics(self, value: Any) -> List[str]:
+        """Normalize interested_topics into a flat list of strings."""
+        if not value:
+            return []
+        if isinstance(value, str):
+            return [value.strip()] if value.strip() else []
+        if isinstance(value, dict):
+            items = []
+            for key in ("category", "topic", "name", "title"):
+                text = self._coerce_text(value.get(key), "")
+                if text:
+                    items.append(text)
+            subtopics = value.get("subtopics")
+            if isinstance(subtopics, (list, tuple, set)):
+                items.extend(self._coerce_topics(list(subtopics)))
+            elif subtopics:
+                text = self._coerce_text(subtopics, "")
+                if text:
+                    items.append(text)
+            return [item for item in items if item]
+        if isinstance(value, (list, tuple, set)):
+            items = []
+            for entry in value:
+                items.extend(self._coerce_topics(entry))
+            return items
+        text = self._coerce_text(value, "")
+        return [text] if text else []
 
     def _search_zep_for_entity(self, entity: EntityNode) -> Dict[str, Any]:
         """
@@ -618,6 +701,29 @@ class OasisProfileGenerator:
                     if "persona" not in result or not result["persona"]:
                         result["persona"] = (
                             entity_summary or f"{entity_name}{entity_type}"
+                        )
+
+                    result["bio"] = self._coerce_text(
+                        result.get("bio"),
+                        entity_summary[:200]
+                        if entity_summary
+                        else f"{entity_type}: {entity_name}",
+                    )
+                    result["persona"] = self._coerce_text(
+                        result.get("persona"),
+                        entity_summary or f"{entity_name}{entity_type}",
+                    )
+                    if "country" in result:
+                        result["country"] = self._coerce_text(
+                            result.get("country"), "Global"
+                        )
+                    if "profession" in result:
+                        result["profession"] = self._coerce_text(
+                            result.get("profession"), ""
+                        )
+                    if "interested_topics" in result:
+                        result["interested_topics"] = self._coerce_topics(
+                            result.get("interested_topics")
                         )
 
                     return result
@@ -1218,15 +1324,21 @@ generationJSON:
 
             # data
             for idx, profile in enumerate(profiles):
+                bio = self._coerce_text(profile.bio, profile.name)
+                persona = self._coerce_text(
+                    profile.persona,
+                    f"{profile.name} is a participant in social discussions.",
+                )
+
                 # user_char: bio + personaused toLLM
-                user_char = profile.bio
-                if profile.persona and profile.persona != profile.bio:
-                    user_char = f"{profile.bio} {profile.persona}"
+                user_char = bio
+                if persona and persona != bio:
+                    user_char = f"{bio} {persona}"
                 # CSV
                 user_char = user_char.replace("\n", " ").replace("\r", " ")
 
                 # description: Bioused to
-                description = profile.bio.replace("\n", " ").replace("\r", " ")
+                description = bio.replace("\n", " ").replace("\r", " ")
 
                 row = [
                     idx,  # user_id: 0StartID
@@ -1287,22 +1399,28 @@ generationJSON:
         data = []
         for idx, profile in enumerate(profiles):
             #  to_reddit_format() 
+            bio = self._coerce_text(profile.bio, profile.name, max_length=150)
+            persona = self._coerce_text(
+                profile.persona,
+                f"{profile.name} is a participant in social discussions.",
+            )
+            country = self._coerce_text(profile.country, "Global")
+
             item = {
                 "user_id": profile.user_id
                 if profile.user_id is not None
                 else idx,  #  user_id
                 "username": profile.user_name,
                 "name": profile.name,
-                "bio": profile.bio[:150] if profile.bio else f"{profile.name}",
-                "persona": profile.persona
-                or f"{profile.name} is a participant in social discussions.",
+                "bio": bio,
+                "persona": persona,
                 "karma": profile.karma if profile.karma else 1000,
                 "created_at": profile.created_at,
                 # OASIS - hasdefault
                 "age": profile.age if profile.age else 30,
                 "gender": self._normalize_gender(profile.gender),
                 "mbti": profile.mbti if profile.mbti else "ISTJ",
-                "country": profile.country if profile.country else "Global",
+                "country": country,
             }
 
             # optional
