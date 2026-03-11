@@ -1,6 +1,6 @@
 """
-Report API路由
-提供模拟报告生成、获取、对话等接口
+Report API routes
+Provides endpoints for report generation, retrieval, and conversation
 """
 
 import os
@@ -19,24 +19,24 @@ from ..utils.logger import get_logger
 logger = get_logger("mirofish.api.report")
 
 
-# ============== 报告生成接口 ==============
+# ============== Report generation API ==============
 
 
 @report_bp.route("/generate", methods=["POST"])
 def generate_report():
     """
-    生成模拟分析报告（异步任务）
+    Generate a simulation analysis report (async)
 
-    这是一个耗时操作，接口会立即返回task_id，
-    使用 GET /api/report/generate/status 查询进度
+    This is a long-running operation; the API returns task_id immediately,
+     GET /api/report/generate/status check progress
 
-    请求（JSON）：
+    Request (JSON)
         {
-            "simulation_id": "sim_xxxx",    // 必填，模拟ID
-            "force_regenerate": false        // 可选，强制重新生成
+            "simulation_id": "sim_xxxx",    // required, simulation ID
+            "force_regenerate": false        // optional, force regenerate
         }
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -56,7 +56,7 @@ def generate_report():
 
         force_regenerate = data.get("force_regenerate", False)
 
-        # 获取模拟信息
+        # Get simulation information
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
 
@@ -65,7 +65,7 @@ def generate_report():
                 {"success": False, "error": f"simulation이 존재하지 않아: {simulation_id}"}
             ), 404
 
-        # 检查是否已有报告
+        # Check whether a report already exists
         if not force_regenerate:
             existing_report = ReportManager.get_report_by_simulation(simulation_id)
             if existing_report and existing_report.status == ReportStatus.COMPLETED:
@@ -82,7 +82,7 @@ def generate_report():
                     }
                 )
 
-        # 获取项目信息
+        # Get project information
         project = ProjectManager.get_project(state.project_id)
         if not project:
             return jsonify(
@@ -99,12 +99,12 @@ def generate_report():
         if not simulation_requirement:
             return jsonify({"success": False, "error": "simulation requirement가 없어"}), 400
 
-        # 提前生成 report_id，以便立即返回给前端
+        # Pre-generate report_id so it can be returned to the frontend immediately
         import uuid
 
         report_id = f"report_{uuid.uuid4().hex[:12]}"
 
-        # 创建异步任务
+        # Create async task
         task_manager = TaskManager()
         task_id = task_manager.create_task(
             task_type="report_generate",
@@ -115,7 +115,7 @@ def generate_report():
             },
         )
 
-        # 定义后台任务
+        # Define background task
         def run_generate():
             try:
                 task_manager.update_task(
@@ -125,25 +125,25 @@ def generate_report():
                     message="Report Agent 초기화 중...",
                 )
 
-                # 创建Report Agent
+                # Create Report Agent
                 agent = ReportAgent(
                     graph_id=graph_id,
                     simulation_id=simulation_id,
                     simulation_requirement=simulation_requirement,
                 )
 
-                # 进度回调
+                # Progress callback
                 def progress_callback(stage, progress, message):
                     task_manager.update_task(
                         task_id, progress=progress, message=f"[{stage}] {message}"
                     )
 
-                # 生成报告（传入预先生成的 report_id）
+                # Generate report with the pre-generated report_id
                 report = agent.generate_report(
                     progress_callback=progress_callback, report_id=report_id
                 )
 
-                # 保存报告
+                # Save report
                 ReportManager.save_report(report)
 
                 if report.status == ReportStatus.COMPLETED:
@@ -164,7 +164,7 @@ def generate_report():
                 logger.error(f"보고서 생성 실패: {str(e)}")
                 task_manager.fail_task(task_id, str(e))
 
-        # 启动后台线程
+        # Start background thread
         thread = threading.Thread(target=run_generate, daemon=True)
         thread.start()
 
@@ -192,15 +192,15 @@ def generate_report():
 @report_bp.route("/generate/status", methods=["POST"])
 def get_generate_status():
     """
-    查询报告生成任务进度
+    Queryreportgenerationprogress
 
-    请求（JSON）：
+    Request (JSON)
         {
-            "task_id": "task_xxxx",         // 可选，generate返回的task_id
-            "simulation_id": "sim_xxxx"     // 可选，模拟ID
+            "task_id": "task_xxxx",         // optional, generation returnstask_id
+            "simulation_id": "sim_xxxx"     // optional, simulation ID
         }
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -217,7 +217,7 @@ def get_generate_status():
         task_id = data.get("task_id")
         simulation_id = data.get("simulation_id")
 
-        # 如果提供了simulation_id，先检查是否已有完成的报告
+        # If simulation_id is provided, first check whether a completed report already exists
         if simulation_id:
             existing_report = ReportManager.get_report_by_simulation(simulation_id)
             if existing_report and existing_report.status == ReportStatus.COMPLETED:
@@ -253,15 +253,15 @@ def get_generate_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-# ============== 报告获取接口 ==============
+# ============== Report retrieval API ==============
 
 
 @report_bp.route("/<report_id>", methods=["GET"])
 def get_report(report_id: str):
     """
-    获取报告详情
+    Get report details
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -293,9 +293,9 @@ def get_report(report_id: str):
 @report_bp.route("/by-simulation/<simulation_id>", methods=["GET"])
 def get_report_by_simulation(simulation_id: str):
     """
-    根据模拟ID获取报告
+    Get report by simulation ID
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -328,13 +328,13 @@ def get_report_by_simulation(simulation_id: str):
 @report_bp.route("/list", methods=["GET"])
 def list_reports():
     """
-    列出所有报告
+    List all reports
 
-    Query参数：
-        simulation_id: 按模拟ID过滤（可选）
-        limit: 返回数量限制（默认50）
+    QueryParameters
+        simulation_id: Filter by simulation IDoptional
+        limit: returnslimitdefault50
 
-    返回：
+    returns
         {
             "success": true,
             "data": [...],
@@ -365,9 +365,9 @@ def list_reports():
 @report_bp.route("/<report_id>/download", methods=["GET"])
 def download_report(report_id: str):
     """
-    下载报告（Markdown格式）
+    Download report (Markdown)
 
-    返回Markdown文件
+    returnsMarkdown file
     """
     try:
         report = ReportManager.get_report(report_id)
@@ -378,7 +378,7 @@ def download_report(report_id: str):
         md_path = ReportManager._get_report_markdown_path(report_id)
 
         if not os.path.exists(md_path):
-            # 如果MD文件不存在，生成一个临时文件
+            # If the Markdown file is missing, generate a temporary file
             import tempfile
 
             with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
@@ -400,7 +400,7 @@ def download_report(report_id: str):
 
 @report_bp.route("/<report_id>", methods=["DELETE"])
 def delete_report(report_id: str):
-    """删除报告"""
+    """Delete report"""
     try:
         success = ReportManager.delete_report(report_id)
 
@@ -416,33 +416,33 @@ def delete_report(report_id: str):
         ), 500
 
 
-# ============== Report Agent对话接口 ==============
+# ============== Report Agentconversation API ==============
 
 
 @report_bp.route("/chat", methods=["POST"])
 def chat_with_report_agent():
     """
-    与Report Agent对话
+    Chat with Report Agent
 
-    Report Agent可以在对话中自主调用检索工具来回答问题
+    Report AgentCalltoolanswer
 
-    请求（JSON）：
+    Request (JSON)
         {
-            "simulation_id": "sim_xxxx",        // 必填，模拟ID
-            "message": "흐름이 어떻게 전개되는지 설명해줘",    // 必填，用户消息
-            "chat_history": [                   // 可选，对话历史
+            "simulation_id": "sim_xxxx",        // required, simulation ID
+            "message": "흐름이 어떻게 전개되는지 설명해줘",    // required, user message
+            "chat_history": [                   // optional, chat history
                 {"role": "user", "content": "..."},
                 {"role": "assistant", "content": "..."}
             ]
         }
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
                 "response": "Agent 응답...",
-                "tool_calls": [调用的工具列表],
-                "sources": [信息来源]
+                "tool_calls": [list of called tools],
+                "sources": [information sources]
             }
         }
     """
@@ -459,7 +459,7 @@ def chat_with_report_agent():
         if not message:
             return jsonify({"success": False, "error": "message를 입력해줘"}), 400
 
-        # 获取模拟和项目信息
+        # Get
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
 
@@ -480,7 +480,7 @@ def chat_with_report_agent():
 
         simulation_requirement = project.simulation_requirement or ""
 
-        # 创建Agent并进行对话
+        # Create the Agent and run the conversation
         agent = ReportAgent(
             graph_id=graph_id,
             simulation_id=simulation_id,
@@ -498,15 +498,15 @@ def chat_with_report_agent():
         ), 500
 
 
-# ============== 报告进度与分章节接口 ==============
+# ============== report progress and section APIs ==============
 
 
 @report_bp.route("/<report_id>/progress", methods=["GET"])
 def get_report_progress(report_id: str):
     """
-    获取报告生成进度（实时）
+    Get report generation progress (real time)
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -539,11 +539,11 @@ def get_report_progress(report_id: str):
 @report_bp.route("/<report_id>/sections", methods=["GET"])
 def get_report_sections(report_id: str):
     """
-    获取已生成的章节列表（分章节输出）
+    Get generated section list (grouped by section)
 
-    前端可以轮询此接口获取已生成的章节内容，无需等待整个报告完成
+    The frontend can poll this API for generated section content without waiting for the whole report to finish
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -552,7 +552,7 @@ def get_report_sections(report_id: str):
                     {
                         "filename": "section_01.md",
                         "section_index": 1,
-                        "content": "## 执行摘要\\n\\n..."
+                        "content": "## Executive Summary\\n\\n..."
                     },
                     ...
                 ],
@@ -564,7 +564,7 @@ def get_report_sections(report_id: str):
     try:
         sections = ReportManager.get_generated_sections(report_id)
 
-        # 获取报告状态
+        # Getreportstate
         report = ReportManager.get_report(report_id)
         is_complete = report is not None and report.status == ReportStatus.COMPLETED
 
@@ -590,14 +590,14 @@ def get_report_sections(report_id: str):
 @report_bp.route("/<report_id>/section/<int:section_index>", methods=["GET"])
 def get_single_section(report_id: str, section_index: int):
     """
-    获取单个章节内容
+    Get a single section's content
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
                 "filename": "section_01.md",
-                "content": "## 执行摘要\\n\\n..."
+                "content": "## Executive Summary\\n\\n..."
             }
         }
     """
@@ -633,17 +633,17 @@ def get_single_section(report_id: str, section_index: int):
         ), 500
 
 
-# ============== 报告状态检查接口 ==============
+# ============== report status check API ==============
 
 
 @report_bp.route("/check/<simulation_id>", methods=["GET"])
 def check_report_status(simulation_id: str):
     """
-    检查模拟是否有报告，以及报告状态
+    Checkwhetherhasreportandreportstate
 
-    用于前端判断是否解锁Interview功能
+    used tofrontenddeterminewhetherunlockInterviewfeature
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -662,7 +662,7 @@ def check_report_status(simulation_id: str):
         report_status = report.status.value if report else None
         report_id = report.report_id if report else None
 
-        # 只有报告完成后才解锁interview
+        # onlyreportcompleteafteronly thenunlockinterview
         interview_unlocked = has_report and report.status == ReportStatus.COMPLETED
 
         return jsonify(
@@ -685,23 +685,23 @@ def check_report_status(simulation_id: str):
         ), 500
 
 
-# ============== Agent 日志接口 ==============
+# ============== Agent log API ==============
 
 
 @report_bp.route("/<report_id>/agent-log", methods=["GET"])
 def get_agent_log(report_id: str):
     """
-    获取 Report Agent 的详细执行日志
+    Fetch detailed execution logs for Report Agent
 
-    实时获取报告生成过程中的每一步动作，包括：
-    - 报告开始、规划开始/完成
-    - 每个章节的开始、工具调用、LLM响应、完成
-    - 报告完成或失败
+    Fetch every step from the report generation process in real time, including:
+    - reportStartplanningStart/complete
+    - eachsectionStarttoolCallLLMcomplete
+    - reportcomplete
 
-    Query参数：
-        from_line: 从第几行开始读取（可选，默认0，用于增量获取）
+    QueryParameters
+        from_line: read starting from lineoptional, default0used toGet
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -745,9 +745,9 @@ def get_agent_log(report_id: str):
 @report_bp.route("/<report_id>/agent-log/stream", methods=["GET"])
 def stream_agent_log(report_id: str):
     """
-    获取完整的 Agent 日志（一次性获取全部）
+    Get the full Agent log in one shot
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -768,22 +768,22 @@ def stream_agent_log(report_id: str):
         ), 500
 
 
-# ============== 控制台日志接口 ==============
+# ============== console log API ==============
 
 
 @report_bp.route("/<report_id>/console-log", methods=["GET"])
 def get_console_log(report_id: str):
     """
-    获取 Report Agent 的控制台输出日志
+    Fetch console logs for Report Agent
 
-    实时获取报告生成过程中的控制台输出（INFO、WARNING等），
-    这与 agent-log 接口返回的结构化 JSON 日志不同，
-    是纯文本格式的控制台风格日志。
+    real-timeGetreportgenerationconsoleoutputINFOWARNING
+    this differs from agent-log APIreturnsstructured JSON logsdifferent
+    plain-text formatconsolelogs
 
-    Query参数：
-        from_line: 从第几行开始读取（可选，默认0，用于增量获取）
+    QueryParameters
+        from_line: read starting from lineoptional, default0used toGet
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -815,9 +815,9 @@ def get_console_log(report_id: str):
 @report_bp.route("/<report_id>/console-log/stream", methods=["GET"])
 def stream_console_log(report_id: str):
     """
-    获取完整的控制台日志（一次性获取全部）
+    Getcompleteconsolelogsone-shotGetall
 
-    返回：
+    returns
         {
             "success": true,
             "data": {
@@ -838,15 +838,15 @@ def stream_console_log(report_id: str):
         ), 500
 
 
-# ============== 工具调用接口（供调试使用）==============
+# ============== toolCallAPI==============
 
 
 @report_bp.route("/tools/search", methods=["POST"])
 def search_graph_tool():
     """
-    图谱搜索工具接口（供调试使用）
+    Graph search tool API (for debugging)
 
-    请求（JSON）：
+    Request (JSON)
         {
             "graph_id": "mirofish_xxxx",
             "query": "검색 질의",
@@ -880,9 +880,9 @@ def search_graph_tool():
 @report_bp.route("/tools/statistics", methods=["POST"])
 def get_graph_statistics_tool():
     """
-    图谱统计工具接口（供调试使用）
+    Graph statistics tool API (for debugging)
 
-    请求（JSON）：
+    Request (JSON)
         {
             "graph_id": "mirofish_xxxx"
         }
