@@ -662,6 +662,12 @@ SECTION_SYSTEM_PROMPT_TEMPLATE = """\
    - 도구 결과에는 영어 또는 혼합 언어가 포함될 수 있다
    - 시뮬레이션 요구사항이나 원문 언어와 무관하게 보고서는 모두 한국어로 작성한다
    - 인용이나 본문에 들어갈 외국어 내용은 의미를 유지한 채 자연스러운 한국어로 번역한다
+   - 영어 엔티티/집단명은 첫 언급 시 한국어 설명을 먼저 쓰고 필요하면 원문을 괄호로 병기한다
+
+4. [요구사항 커버리지]
+   - 시뮬레이션 요구사항에 국가/권역 비교가 있으면 본문에서 빠뜨리지 마라
+   - 특정 한 국가 시각만 반복하지 말고, 최소 두 개 이상의 국가/권역 시각 차이를 드러내라
+   - 시간축, 집단 반응, 구조적 리스크 중 현재 섹션에 필요한 축을 명확히 선택해 깊게 파고들어라
 
 4. [예측 결과에 충실할 것]
    - 보고서는 시뮬레이션이 보여준 미래 결과를 충실히 반영해야 한다
@@ -771,6 +777,8 @@ SECTION_USER_PROMPT_TEMPLATE = """\
 3. 이 섹션만의 새로운 근거, 새로운 집단, 새로운 전환 포인트를 찾아라
 4. 보고서 내용은 반드시 검색 결과에서 나와야 하며 네 지식을 끼워 넣지 마라
 5. 다른 섹션에서 이미 충분히 다룬 프레임은 짧게 연결만 하고, 새로운 분석 축으로 넘어가라
+6. 시뮬레이션 요구사항에 포함된 국가/권역(예: 한국, 미국, 일본, 글로벌) 중 현재 섹션과 관련된 비교를 반드시 반영하라
+7. 영어 표현을 그대로 두지 말고, 본문 설명은 자연스러운 한국어로 정리하라
 
 [형식 경고]
 - ❌ 어떤 제목도 쓰지 마라 (#, ##, ###, #### 금지)
@@ -1255,6 +1263,49 @@ class ReportAgent:
             return "(아직 사용한 핵심 인용이 없음)"
         return "\n".join(f'- {quote}' for quote in quotes[:12])
 
+    def _revise_section_if_needed(
+        self,
+        section_title: str,
+        content: str,
+        previous_sections: List[str],
+        messages: List[Dict[str, str]],
+    ) -> str:
+        previous_quotes = set(self._extract_used_quotes("\n".join(previous_sections)))
+        if not previous_quotes:
+            return content
+
+        current_quotes = self._extract_used_quotes(content)
+        overlap = [quote for quote in current_quotes if quote in previous_quotes]
+        if len(overlap) < 2:
+            return content
+
+        revision_messages = messages + [
+            {"role": "assistant", "content": f"Final Answer: {content}"},
+            {
+                "role": "user",
+                "content": (
+                    "[품질 재작성] 방금 쓴 본문은 이전 섹션과 같은 인용을 반복했다.\n"
+                    f"겹치는 인용: {overlap[:5]}\n"
+                    "이미 수집된 도구 결과 안에서 다른 사실과 인용을 골라 같은 섹션을 다시 써라. "
+                    "겹치는 인용은 다시 쓰지 말고, 한국어 본문만 Final Answer: 형식으로 출력하라."
+                ),
+            },
+        ]
+
+
+        revised = self.llm.chat(messages=revision_messages, temperature=0.4, max_tokens=4096)
+        if not revised:
+            return content
+
+        revised_content = (
+            revised.split("Final Answer:")[-1].strip()
+            if "Final Answer:" in revised
+            else revised.strip()
+        )
+        revised_quotes = self._extract_used_quotes(revised_content)
+        revised_overlap = [quote for quote in revised_quotes if quote in previous_quotes]
+        return revised_content if len(revised_overlap) < len(overlap) else content
+
     def plan_outline(
         self, progress_callback: Optional[Callable] = None
     ) -> ReportOutline:
@@ -1535,6 +1586,10 @@ class ReportAgent:
                 final_answer = response.split("Final Answer:")[-1].strip()
                 logger.info(
                     f"섹션 {section.title} 생성 완료 (도구 호출: {tool_calls_count}회)"
+                )
+
+                final_answer = self._revise_section_if_needed(
+                    section.title, final_answer, previous_sections, messages
                 )
 
                 if self.report_logger:
@@ -2772,6 +2827,10 @@ class ReportManager:
             deleted = True
 
         return deleted
+
+
+
+
 
 
 
