@@ -334,8 +334,8 @@ class SimulationConfigGenerator:
 
         reasoning_parts = []
 
-        # ========== 步骤1: 生成时间配置 ==========
-        report_progress(1, "生成时间配置...")
+        # ========== Step 1: time configuration ==========
+        report_progress(1, "시간 설정 생성 중...")
         num_entities = len(entities)
         locale_code = infer_locale(f"{simulation_requirement}\n{context}")
         time_config_result = self._generate_time_config(
@@ -345,20 +345,20 @@ class SimulationConfigGenerator:
             time_config_result, num_entities, locale_code
         )
         reasoning_parts.append(
-            f"时间配置: {time_config_result.get('reasoning', '成功')}"
+            f"시간 설정: {time_config_result.get('reasoning', '성공')}"
         )
 
-        # ========== 步骤2: 生成事件配置 ==========
-        report_progress(2, "生成事件配置和热点话题...")
+        # ========== Step 2: event configuration ==========
+        report_progress(2, "이벤트 설정과 핵심 토픽 생성 중...")
         event_config_result = self._generate_event_config(
             context, simulation_requirement, entities
         )
         event_config = self._parse_event_config(event_config_result)
         reasoning_parts.append(
-            f"事件配置: {event_config_result.get('reasoning', '成功')}"
+            f"이벤트 설정: {event_config_result.get('reasoning', '성공')}"
         )
 
-        # ========== 步骤3-N: 分批生成Agent配置 ==========
+        # ========== Step 3-N: generate agent configs in batches ==========
         all_agent_configs = []
         for batch_idx in range(num_batches):
             start_idx = batch_idx * self.AGENTS_PER_BATCH
@@ -367,7 +367,7 @@ class SimulationConfigGenerator:
 
             report_progress(
                 3 + batch_idx,
-                f"生成Agent配置 ({start_idx + 1}-{end_idx}/{len(entities)})...",
+                f"Agent 설정 생성 중 ({start_idx + 1}-{end_idx}/{len(entities)})...",
             )
 
             batch_configs = self._generate_agent_configs_batch(
@@ -379,10 +379,10 @@ class SimulationConfigGenerator:
             )
             all_agent_configs.extend(batch_configs)
 
-        reasoning_parts.append(f"Agent配置: 成功生成 {len(all_agent_configs)} 个")
+        reasoning_parts.append(f"Agent 설정: {len(all_agent_configs)}개 생성 완료")
 
-        # ========== 为初始帖子分配发布者 Agent ==========
-        logger.info("为初始帖子分配合适的发布者 Agent...")
+        # ========== Assign posters for initial posts ==========
+        logger.info("초기 게시물 발행 Agent를 배정하는 중...")
         event_config = self._assign_initial_post_agents(event_config, all_agent_configs)
         assigned_count = len(
             [
@@ -391,7 +391,9 @@ class SimulationConfigGenerator:
                 if p.get("poster_agent_id") is not None
             ]
         )
-        reasoning_parts.append(f"初始帖子分配: {assigned_count} 个帖子已分配发布者")
+        reasoning_parts.append(
+            f"초기 게시물 배정: {assigned_count}개 게시물에 발행자를 연결함"
+        )
 
         # ========== 最后一步: 生成平台配置 ==========
         report_progress(total_steps, "生成平台配置...")

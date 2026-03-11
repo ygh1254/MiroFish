@@ -1095,7 +1095,7 @@ class OasisProfileGenerator:
                         progress_callback(
                             current,
                             total,
-                            f"已完成 {current}/{total}: {entity.name}（{entity_type}）",
+                            f"{current}/{total} 완료: {entity.name} ({entity_type})",
                         )
 
                     if error:
@@ -1104,7 +1104,7 @@ class OasisProfileGenerator:
                         )
                     else:
                         logger.info(
-                            f"[{current}/{total}] 成功生成人设: {entity.name} ({entity_type})"
+                            f"[{current}/{total}] 프로필 생성 완료: {entity.name} ({entity_type})"
                         )
 
                 except Exception as e:
@@ -1125,7 +1125,7 @@ class OasisProfileGenerator:
                     save_profiles_realtime()
 
         print(f"\n{'=' * 60}")
-        print(f"人设生成完成！共生成 {len([p for p in profiles if p])} 个Agent")
+        print(f"프로필 생성 완료! 총 {len([p for p in profiles if p])}개 Agent")
         print(f"{'=' * 60}\n")
 
         return profiles
@@ -1143,20 +1143,20 @@ class OasisProfileGenerator:
 
         output_lines = [
             f"\n{separator}",
-            f"[已生成] {entity_name} ({entity_type})",
+            f"[생성 완료] {entity_name} ({entity_type})",
             f"{separator}",
-            f"用户名: {profile.user_name}",
+            f"사용자명: {profile.user_name}",
             f"",
-            f"【简介】",
+            f"【소개】",
             f"{profile.bio}",
             f"",
-            f"【详细人设】",
+            f"【상세 페르소나】",
             f"{profile.persona}",
             f"",
-            f"【基本属性】",
+            f"【기본 속성】",
             f"年龄: {profile.age} | 性别: {profile.gender} | MBTI: {profile.mbti}",
-            f"职业: {profile.profession} | 国家: {profile.country}",
-            f"兴趣话题: {topics_str}",
+            f"직업: {profile.profession} | 국가: {profile.country}",
+            f"관심 주제: {topics_str}",
             separator,
         ]
 
