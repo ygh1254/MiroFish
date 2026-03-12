@@ -13,8 +13,8 @@ Read the provided source material and simulation requirement, then generate a co
 
 Requirements:
 - Return JSON only. Do not output extra prose.
-- Produce exactly 10 entity types.
-- Produce 6 to 10 edge types.
+- Produce 8 to 12 entity types.
+- Produce 4 to 10 edge types.
 - Each entity type must include:
   - name (PascalCase)
   - description
@@ -23,6 +23,7 @@ Requirements:
 - Do not redefine built-in fields such as name, uuid, group_id, created_at, or summary.
 - Use source_targets on each edge type to declare valid source/target pairs.
 - Prefer concrete, practical types derived from the material.
+- Focus on the most important axes and omit low-signal peripheral types if the topic is broad.
 - Include a short Korean analysis_summary.
 
 Return JSON in this shape:
@@ -139,14 +140,14 @@ class OntologyGenerator:
 """
 
         message += """
-Based oncontenttypestypes
+Based on the material, choose the most important ontology axes first.
 
-****
-1. output10 entity types
-2. after2typesPerson Organization
-3. 8Based oncontenttypes
-4. hastypes
-5.  nameuuidgroup_id  full_nameorg_name 
+Rules:
+1. Prefer 8 to 12 entity types and 4 to 10 edge types.
+2. For broad topics, keep only the highest-signal entity families instead of trying to cover everything.
+3. Include Person or Organization only when the material clearly supports them.
+4. Avoid low-value duplicate types that differ only by wording.
+5. Do not redefine built-in fields such as name, uuid, group_id, full_name, or org_name.
 """
 
         return message
@@ -182,8 +183,10 @@ Based oncontenttypestypes
                 edge["description"] = edge["description"][:97] + "..."
 
         # Zep API  10 Customtypes 10 Customtypes
-        MAX_ENTITY_TYPES = 10
+        MAX_ENTITY_TYPES = 12
         MAX_EDGE_TYPES = 10
+        MIN_ENTITY_TYPES = 8
+        MIN_EDGE_TYPES = 4
 
         # typesdefinition
         person_fallback = {
@@ -218,38 +221,23 @@ Based oncontenttypestypes
             "examples": ["small business", "community group"],
         }
 
-        # Checkwhetherhastypes
-        entity_names = {e["name"] for e in result["entity_types"]}
-        has_person = "Person" in entity_names
-        has_organization = "Organization" in entity_names
-
-        # addtypes
-        fallbacks_to_add = []
-        if not has_person:
-            fallbacks_to_add.append(person_fallback)
-        if not has_organization:
-            fallbacks_to_add.append(organization_fallback)
-
-        if fallbacks_to_add:
-            current_count = len(result["entity_types"])
-            needed_slots = len(fallbacks_to_add)
-
-            # addafter 10 hastypes
-            if current_count + needed_slots > MAX_ENTITY_TYPES:
-                # 
-                to_remove = current_count + needed_slots - MAX_ENTITY_TYPES
-                # types
-                result["entity_types"] = result["entity_types"][:-to_remove]
-
-            # addtypes
-            result["entity_types"].extend(fallbacks_to_add)
-
-        # 
+        # Keep the ontology compact and coherent for broad topics.
         if len(result["entity_types"]) > MAX_ENTITY_TYPES:
             result["entity_types"] = result["entity_types"][:MAX_ENTITY_TYPES]
 
         if len(result["edge_types"]) > MAX_EDGE_TYPES:
             result["edge_types"] = result["edge_types"][:MAX_EDGE_TYPES]
+
+        # Add broad fallback types only when the ontology is too sparse.
+        entity_names = {e["name"] for e in result["entity_types"]}
+        if len(result["entity_types"]) < MIN_ENTITY_TYPES:
+            if "Person" not in entity_names:
+                result["entity_types"].append(person_fallback)
+            if len(result["entity_types"]) < MIN_ENTITY_TYPES and "Organization" not in entity_names:
+                result["entity_types"].append(organization_fallback)
+
+        if len(result["edge_types"]) < MIN_EDGE_TYPES and result["entity_types"]:
+            result["edge_types"] = result["edge_types"][:MIN_EDGE_TYPES] if len(result["edge_types"]) >= MIN_EDGE_TYPES else result["edge_types"]
 
         return result
 
@@ -361,3 +349,4 @@ Based oncontenttypestypes
         code_lines.append("}")
 
         return "\n".join(code_lines)
+
